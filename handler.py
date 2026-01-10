@@ -120,22 +120,28 @@ def load_model():
         use_stream=True
     )
 
-    # Create pipeline with pre-loaded components
-    print("[WAN2.2] Creating pipeline...")
-    PIPE = WanPipeline.from_pretrained(
-        model_id,
+    # Create pipeline with pre-loaded components (skip downloading duplicates)
+    print("[WAN2.2] Creating pipeline (skipping already-loaded components)...", flush=True)
+    from diffusers import UniPCMultistepScheduler
+    from transformers import AutoTokenizer
+
+    # Load only the small components we don't have yet
+    tokenizer = AutoTokenizer.from_pretrained(model_id, subfolder="tokenizer")
+    scheduler = UniPCMultistepScheduler.from_pretrained(model_id, subfolder="scheduler")
+
+    # Configure scheduler with optimal flow_shift for 720p
+    scheduler = UniPCMultistepScheduler.from_config(
+        scheduler.config,
+        flow_shift=5.0  # Optimal for 720p resolution
+    )
+
+    # Construct pipeline directly without re-downloading large components
+    PIPE = WanPipeline(
         vae=vae,
         transformer=transformer,
         text_encoder=text_encoder,
-        torch_dtype=torch.bfloat16
-    )
-
-    # Configure scheduler with optimal flow_shift for 720p
-    # flow_shift=5.0 for 720p, 3.0 for 480p (per official docs)
-    from diffusers import UniPCMultistepScheduler
-    PIPE.scheduler = UniPCMultistepScheduler.from_config(
-        PIPE.scheduler.config,
-        flow_shift=5.0  # Optimal for 720p resolution
+        tokenizer=tokenizer,
+        scheduler=scheduler,
     )
 
     PIPE.to("cuda")
