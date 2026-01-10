@@ -29,9 +29,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# Pre-download the model to bake into image (faster cold starts)
-# This downloads ~50GB+ of model files - will take a while but speeds up runtime
-RUN python -c "import torch; from diffusers import LTX2Pipeline; LTX2Pipeline.from_pretrained('Lightricks/LTX-2', torch_dtype=torch.bfloat16)"
+# Verify all imports work (model downloaded at runtime on first request)
+RUN python -c "from diffusers import LTX2Pipeline; from transformers import T5EncoderModel; import torch; print('All imports successful')"
 
 # Copy handler
 COPY handler.py .

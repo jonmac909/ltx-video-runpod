@@ -79,8 +79,6 @@ def generate_video(
     Returns:
         Path to the generated video file
     """
-    from diffusers.pipelines.ltx2.export_utils import encode_video
-
     pipe = load_model()
 
     # Calculate number of frames (must be divisible by 8 + 1)
