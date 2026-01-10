@@ -16,6 +16,8 @@ transformers>=4.45.0
 accelerate>=0.25.0
 safetensors>=0.4.0
 sentencepiece>=0.2.0
+ftfy>=6.0.0
+huggingface_hub>=0.23.0
 
 # Image/Video processing
 Pillow>=10.0.0

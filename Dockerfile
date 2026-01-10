@@ -1,6 +1,6 @@
 # WAN 2.2 Video Generation RunPod Serverless Handler
 # Uses HuggingFace Diffusers WanPipeline (720p@24fps optimized)
-# v1.1.1 - Fixed model ID: Wan-AI/Wan2.2-T2V-A14B-Diffusers (A14B not 14B)
+# v1.1.2 - Added ftfy dep, improved import verification
 
 FROM nvidia/cuda:12.1.0-cudnn8-devel-ubuntu22.04
 
@@ -31,7 +31,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
 # Verify all imports work (model downloaded at runtime on first request)
-RUN python -c "from diffusers import WanPipeline, AutoModel; from transformers import UMT5EncoderModel; import torch; print('All WAN 2.2 imports successful')"
+RUN python -c "from diffusers import WanPipeline, AutoModel, UniPCMultistepScheduler; from diffusers.hooks.group_offloading import apply_group_offloading; from diffusers.utils import export_to_video; from transformers import UMT5EncoderModel; import torch; import ftfy; print('All WAN 2.2 imports successful')"
 
 # Copy handler
 COPY handler.py .
