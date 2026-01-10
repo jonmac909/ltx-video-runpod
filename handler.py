@@ -25,6 +25,9 @@ from supabase import create_client, Client
 os.environ["HF_HOME"] = "/tmp/hf_cache"
 os.environ["TRANSFORMERS_CACHE"] = "/tmp/hf_cache"
 os.environ["HUGGINGFACE_HUB_CACHE"] = "/tmp/hf_cache"
+# Enable download progress logging
+os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "0"
+os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0"  # Disable hf_transfer for better logging
 
 # Initialize model as global for warm starts
 PIPE = None
@@ -70,26 +73,32 @@ def load_model():
     model_id = "Wan-AI/Wan2.2-T2V-A14B-Diffusers"
 
     # Load components with appropriate dtypes
-    print("[WAN2.2] Loading text encoder...")
+    print("[WAN2.2] Loading text encoder...", flush=True)
+    t0 = time.time()
     text_encoder = UMT5EncoderModel.from_pretrained(
         model_id,
         subfolder="text_encoder",
         torch_dtype=torch.bfloat16
     )
+    print(f"[WAN2.2] Text encoder loaded in {time.time()-t0:.1f}s", flush=True)
 
-    print("[WAN2.2] Loading VAE (float32 for quality)...")
+    print("[WAN2.2] Loading VAE (float32 for quality)...", flush=True)
+    t0 = time.time()
     vae = AutoModel.from_pretrained(
         model_id,
         subfolder="vae",
         torch_dtype=torch.float32  # float32 for better decoding quality
     )
+    print(f"[WAN2.2] VAE loaded in {time.time()-t0:.1f}s", flush=True)
 
-    print("[WAN2.2] Loading transformer...")
+    print("[WAN2.2] Loading transformer (this is ~27GB, may take 5-10 min on cold start)...", flush=True)
+    t0 = time.time()
     transformer = AutoModel.from_pretrained(
         model_id,
         subfolder="transformer",
         torch_dtype=torch.bfloat16
     )
+    print(f"[WAN2.2] Transformer loaded in {time.time()-t0:.1f}s", flush=True)
 
     # Apply group offloading for memory efficiency on 48GB GPUs
     print("[WAN2.2] Applying group offloading...")
