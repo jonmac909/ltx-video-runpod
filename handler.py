@@ -119,13 +119,15 @@ def generate_video(
     print(f"[LTX-2] Prompt: {prompt[:100]}...")
 
     # Set up generator for reproducibility
+    # Use CPU generator - CPU offload handles device placement
     generator = None
     if seed is not None:
-        generator = torch.Generator(device="cuda").manual_seed(seed)
+        generator = torch.Generator().manual_seed(seed)
 
     start = time.time()
 
     # Generate video
+    print(f"[LTX-2] Starting generation with {num_inference_steps} steps...")
     output = pipe(
         prompt=prompt,
         negative_prompt=negative_prompt,
@@ -137,8 +139,17 @@ def generate_video(
         generator=generator,
     )
 
-    # Get video frames
+    # Debug: Print output structure
+    print(f"[LTX-2] Output type: {type(output)}")
+    print(f"[LTX-2] Output frames type: {type(output.frames)}")
+    print(f"[LTX-2] Output frames length: {len(output.frames) if hasattr(output.frames, '__len__') else 'N/A'}")
+
+    if len(output.frames) == 0:
+        raise ValueError("Pipeline returned empty frames - generation failed")
+
+    # Get video frames - handle different output structures
     video = output.frames[0]  # Shape: [frames, height, width, channels]
+    print(f"[LTX-2] Video shape: {video.shape if hasattr(video, 'shape') else 'N/A'}")
 
     gen_time = time.time() - start
     print(f"[LTX-2] Video generated in {gen_time:.1f}s ({gen_time/duration_seconds:.1f}x realtime)")
