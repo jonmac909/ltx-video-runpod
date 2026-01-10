@@ -1,5 +1,5 @@
-# LTX-2 Video Generation RunPod Serverless Handler
-# Uses HuggingFace Diffusers for simplicity
+# LTX Video Generation RunPod Serverless Handler
+# Uses HuggingFace Diffusers LTXPipeline
 
 FROM nvidia/cuda:12.1.0-cudnn8-devel-ubuntu22.04
 
@@ -30,7 +30,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
 # Verify all imports work (model downloaded at runtime on first request)
-RUN python -c "from diffusers import LTX2Pipeline; from transformers import T5EncoderModel; import torch; print('All imports successful')"
+RUN python -c "from diffusers import LTXPipeline; from transformers import T5EncoderModel; import torch; print('All imports successful')"
 
 # Copy handler
 COPY handler.py .
@@ -39,7 +39,10 @@ COPY handler.py .
 ENV PYTHONUNBUFFERED=1
 ENV PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 ENV CUDA_VISIBLE_DEVICES=0
-ENV HF_HOME=/root/.cache/huggingface
+# Set HF cache to container disk
+ENV HF_HOME=/tmp/hf_cache
+ENV TRANSFORMERS_CACHE=/tmp/hf_cache
+ENV HUGGINGFACE_HUB_CACHE=/tmp/hf_cache
 
 # Run handler
 CMD ["python", "-u", "handler.py"]

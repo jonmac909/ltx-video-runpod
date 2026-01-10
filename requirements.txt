@@ -10,8 +10,8 @@ torch>=2.1.0
 torchvision>=0.16.0
 torchaudio>=2.1.0
 
-# HuggingFace Diffusers for LTX-2 (from main branch for LTX2Pipeline support)
-git+https://github.com/huggingface/diffusers.git@main
+# HuggingFace Diffusers (stable release with LTX-Video support)
+diffusers>=0.31.0
 transformers>=4.45.0
 accelerate>=0.25.0
 safetensors>=0.4.0

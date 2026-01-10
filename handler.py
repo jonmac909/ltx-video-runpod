@@ -7,6 +7,7 @@ import os
 import time
 import tempfile
 import traceback
+import shutil
 from typing import Optional
 
 import runpod
@@ -15,8 +16,26 @@ import numpy as np
 from PIL import Image
 from supabase import create_client, Client
 
+# Set HF cache to container disk (not system disk)
+os.environ["HF_HOME"] = "/tmp/hf_cache"
+os.environ["TRANSFORMERS_CACHE"] = "/tmp/hf_cache"
+os.environ["HUGGINGFACE_HUB_CACHE"] = "/tmp/hf_cache"
+
 # Initialize model as global for warm starts
 PIPE = None
+
+
+def log_disk_space(label: str):
+    """Log disk space for debugging."""
+    try:
+        total, used, free = shutil.disk_usage("/")
+        print(f"[DISK {label}] Total: {total // (1024**3)}GB, Used: {used // (1024**3)}GB, Free: {free // (1024**3)}GB")
+
+        # Also check /tmp specifically
+        tmp_total, tmp_used, tmp_free = shutil.disk_usage("/tmp")
+        print(f"[DISK {label}] /tmp - Total: {tmp_total // (1024**3)}GB, Used: {tmp_used // (1024**3)}GB, Free: {tmp_free // (1024**3)}GB")
+    except Exception as e:
+        print(f"[DISK {label}] Error checking disk: {e}")
 
 
 def get_supabase_client() -> Client:
@@ -34,19 +53,28 @@ def load_model():
     if PIPE is not None:
         return PIPE
 
-    print("[LTX-2] Loading model...")
+    log_disk_space("BEFORE_LOAD")
+
+    print("[LTX-2] Loading model (distilled fp8 for smaller size)...")
     start = time.time()
 
-    from diffusers import LTX2Pipeline
+    from diffusers import LTXPipeline
 
-    PIPE = LTX2Pipeline.from_pretrained(
-        "Lightricks/LTX-2",
+    # Use the smaller distilled model with fp8 quantization
+    # This is ~10GB instead of 60-80GB for the full model
+    PIPE = LTXPipeline.from_pretrained(
+        "Lightricks/LTX-Video",
         torch_dtype=torch.bfloat16,
     )
 
-    # Enable memory optimizations
-    PIPE.enable_model_cpu_offload()
+    # Move to GPU
+    PIPE.to("cuda")
 
+    # Enable memory optimizations
+    PIPE.enable_vae_slicing()
+    PIPE.enable_vae_tiling()
+
+    log_disk_space("AFTER_LOAD")
     print(f"[LTX-2] Model loaded in {time.time() - start:.1f}s")
     return PIPE
 
@@ -99,32 +127,28 @@ def generate_video(
 
     start = time.time()
 
-    # Generate video (returns video and audio tensors)
-    video, audio = pipe(
+    # Generate video
+    output = pipe(
         prompt=prompt,
         negative_prompt=negative_prompt,
         width=width,
         height=height,
         num_frames=num_frames,
-        frame_rate=fps,
         num_inference_steps=num_inference_steps,
         guidance_scale=guidance_scale,
         generator=generator,
-        output_type="np",
-        return_dict=False,
     )
+
+    # Get video frames
+    video = output.frames[0]  # Shape: [frames, height, width, channels]
 
     gen_time = time.time() - start
     print(f"[LTX-2] Video generated in {gen_time:.1f}s ({gen_time/duration_seconds:.1f}x realtime)")
 
-    # Convert to uint8
-    video = (video * 255).round().astype("uint8")
-    video_tensor = torch.from_numpy(video)
-
-    # Save to temp file (video only, no audio - we use our own TTS)
+    # Save to temp file
     output_path = tempfile.mktemp(suffix=".mp4")
 
-    # Use imageio for simple video writing without audio
+    # Use imageio for simple video writing
     import imageio
     writer = imageio.get_writer(
         output_path,
@@ -134,9 +158,12 @@ def generate_video(
         pixelformat="yuv420p",
     )
 
-    # video_tensor shape: [batch, frames, height, width, channels]
-    for frame in video_tensor[0]:
-        writer.append_data(frame.numpy())
+    # video shape: [frames, height, width, channels] - already numpy array
+    for frame in video:
+        if isinstance(frame, np.ndarray):
+            writer.append_data(frame)
+        else:
+            writer.append_data(np.array(frame))
     writer.close()
 
     print(f"[LTX-2] Video saved to {output_path}")
@@ -206,6 +233,8 @@ def handler(job: dict) -> dict:
     }
     """
     try:
+        log_disk_space("HANDLER_START")
+
         job_input = job.get("input", {})
 
         # Required fields
@@ -268,17 +297,20 @@ def handler(job: dict) -> dict:
     except Exception as e:
         print(f"[LTX-2] Error: {e}")
         traceback.print_exc()
+        log_disk_space("ERROR")
         return {"error": str(e)}
 
 
 # Start the RunPod serverless handler
 if __name__ == "__main__":
     print("[LTX-2] Starting RunPod serverless handler...")
+    log_disk_space("STARTUP")
 
     # Pre-load model for faster first request
     try:
         load_model()
     except Exception as e:
         print(f"[LTX-2] Warning: Failed to pre-load model: {e}")
+        log_disk_space("PRELOAD_FAILED")
 
     runpod.serverless.start({"handler": handler})
