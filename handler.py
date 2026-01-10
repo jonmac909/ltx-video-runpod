@@ -1,6 +1,7 @@
 """
-LTX-2 Video Generation RunPod Serverless Handler
+WAN 2.2 Video Generation RunPod Serverless Handler
 Generates video clips from text prompts using HuggingFace Diffusers.
+Optimized for 720p@24fps on 48GB GPUs.
 """
 
 import os
@@ -13,7 +14,6 @@ from typing import Optional
 import runpod
 import torch
 import numpy as np
-from PIL import Image
 from supabase import create_client, Client
 
 # Set HF cache to container disk (not system disk)
@@ -48,58 +48,102 @@ def get_supabase_client() -> Client:
 
 
 def load_model():
-    """Load LTX-2 model once and keep it warm."""
+    """Load WAN 2.2 model once and keep it warm."""
     global PIPE
     if PIPE is not None:
         return PIPE
 
     log_disk_space("BEFORE_LOAD")
 
-    print("[LTX-2] Loading full model...")
+    print("[WAN2.2] Loading model components...")
     start = time.time()
 
-    from diffusers import LTXPipeline
+    from diffusers import AutoModel, WanPipeline
+    from diffusers.hooks.group_offloading import apply_group_offloading
+    from transformers import UMT5EncoderModel
 
-    # Full LTX-Video model
-    PIPE = LTXPipeline.from_pretrained(
-        "Lightricks/LTX-Video",
-        torch_dtype=torch.bfloat16,
+    model_id = "Wan-AI/Wan2.2-T2V-14B-Diffusers"
+
+    # Load components with appropriate dtypes
+    print("[WAN2.2] Loading text encoder...")
+    text_encoder = UMT5EncoderModel.from_pretrained(
+        model_id,
+        subfolder="text_encoder",
+        torch_dtype=torch.bfloat16
     )
 
-    # Memory optimizations for 48GB GPUs - enables 1080p generation
-    # CPU offload moves model parts to CPU when not in use, reducing VRAM
-    PIPE.enable_model_cpu_offload()
+    print("[WAN2.2] Loading VAE (float32 for quality)...")
+    vae = AutoModel.from_pretrained(
+        model_id,
+        subfolder="vae",
+        torch_dtype=torch.float32  # float32 for better decoding quality
+    )
 
-    # Note: enable_vae_slicing/tiling are for image pipelines, not video
-    # LTXPipeline doesn't support them
+    print("[WAN2.2] Loading transformer...")
+    transformer = AutoModel.from_pretrained(
+        model_id,
+        subfolder="transformer",
+        torch_dtype=torch.bfloat16
+    )
+
+    # Apply group offloading for memory efficiency on 48GB GPUs
+    print("[WAN2.2] Applying group offloading...")
+    onload_device = torch.device("cuda")
+    offload_device = torch.device("cpu")
+
+    apply_group_offloading(
+        text_encoder,
+        onload_device=onload_device,
+        offload_device=offload_device,
+        offload_type="block_level",
+        num_blocks_per_group=4
+    )
+
+    transformer.enable_group_offload(
+        onload_device=onload_device,
+        offload_device=offload_device,
+        offload_type="leaf_level",
+        use_stream=True
+    )
+
+    # Create pipeline with pre-loaded components
+    print("[WAN2.2] Creating pipeline...")
+    PIPE = WanPipeline.from_pretrained(
+        model_id,
+        vae=vae,
+        transformer=transformer,
+        text_encoder=text_encoder,
+        torch_dtype=torch.bfloat16
+    )
+    PIPE.to("cuda")
 
     log_disk_space("AFTER_LOAD")
-    print(f"[LTX-2] Model loaded in {time.time() - start:.1f}s")
+    print(f"[WAN2.2] Model loaded in {time.time() - start:.1f}s")
     return PIPE
 
 
 def generate_video(
     prompt: str,
-    duration_seconds: float = 10.0,
-    width: int = 768,
-    height: int = 512,
+    duration_seconds: float = 5.0,
+    width: int = 1280,
+    height: int = 720,
     fps: float = 24.0,
-    num_inference_steps: int = 40,
-    guidance_scale: float = 4.0,
-    negative_prompt: str = "worst quality, inconsistent motion, blurry, jittery, distorted",
+    num_inference_steps: int = 30,
+    guidance_scale: float = 5.0,
+    negative_prompt: str = "Bright tones, overexposed, static, blurred details, subtitles, worst quality, low quality, ugly, deformed, disfigured",
     seed: Optional[int] = None,
 ) -> str:
     """
-    Generate a video from a text prompt.
+    Generate a video from a text prompt using WAN 2.2.
 
     Args:
         prompt: Text description of the video to generate
-        duration_seconds: Video duration in seconds (max ~10s recommended)
-        width: Video width in pixels (must be divisible by 32)
-        height: Video height in pixels (must be divisible by 32)
-        fps: Frames per second
-        num_inference_steps: Denoising steps (more = higher quality but slower)
-        guidance_scale: CFG scale (higher = closer to prompt but less natural)
+        duration_seconds: Video duration in seconds
+        width: Video width in pixels (1280 for 720p)
+        height: Video height in pixels (720 for 720p)
+        fps: Frames per second (24 recommended)
+        num_inference_steps: Denoising steps (30 is good balance)
+        guidance_scale: CFG scale (5.0 recommended for WAN)
         negative_prompt: What to avoid in the video
         seed: Random seed for reproducibility
 
@@ -108,75 +152,64 @@ def generate_video(
     """
     pipe = load_model()
 
-    # Calculate number of frames (must be divisible by 8 + 1)
-    num_frames = int(duration_seconds * fps)
-    num_frames = ((num_frames - 1) // 8) * 8 + 1  # Ensure divisible by 8 + 1
+    # Calculate number of frames: must be 4k + 1 for WAN
+    # For 5s at 24fps = 120 frames, nearest 4k+1 = 121 (k=30)
+    raw_frames = int(duration_seconds * fps)
+    k = (raw_frames - 1) // 4
+    num_frames = 4 * k + 1
 
-    # Ensure dimensions are divisible by 32
-    width = (width // 32) * 32
-    height = (height // 32) * 32
+    # Ensure dimensions are divisible by 16 (WAN requirement)
+    width = (width // 16) * 16
+    height = (height // 16) * 16
 
-    print(f"[LTX-2] Generating {duration_seconds:.1f}s video ({num_frames} frames, {width}x{height})")
-    print(f"[LTX-2] Prompt: {prompt[:100]}...")
+    print(f"[WAN2.2] Generating {duration_seconds:.1f}s video ({num_frames} frames, {width}x{height})")
+    print(f"[WAN2.2] Prompt: {prompt[:100]}...")
 
     # Set up generator for reproducibility
-    # Use CPU generator - CPU offload handles device placement
     generator = None
     if seed is not None:
-        generator = torch.Generator().manual_seed(seed)
+        generator = torch.Generator(device="cuda").manual_seed(seed)
 
     start = time.time()
 
     # Generate video
-    print(f"[LTX-2] Starting generation with {num_inference_steps} steps...")
+    # Use shift value based on resolution (higher for 720p)
+    shift = 7.0  # Good for 720p resolution
+
+    print(f"[WAN2.2] Starting generation with {num_inference_steps} steps, shift={shift}...")
     output = pipe(
         prompt=prompt,
         negative_prompt=negative_prompt,
-        width=width,
-        height=height,
         num_frames=num_frames,
         num_inference_steps=num_inference_steps,
         guidance_scale=guidance_scale,
+        height=height,
+        width=width,
         generator=generator,
     )
 
     # Debug: Print output structure
-    print(f"[LTX-2] Output type: {type(output)}")
-    print(f"[LTX-2] Output frames type: {type(output.frames)}")
-    print(f"[LTX-2] Output frames length: {len(output.frames) if hasattr(output.frames, '__len__') else 'N/A'}")
+    print(f"[WAN2.2] Output type: {type(output)}")
+    print(f"[WAN2.2] Output frames type: {type(output.frames)}")
+    print(f"[WAN2.2] Output frames length: {len(output.frames) if hasattr(output.frames, '__len__') else 'N/A'}")
 
     if len(output.frames) == 0:
         raise ValueError("Pipeline returned empty frames - generation failed")
 
-    # Get video frames - handle different output structures
-    video = output.frames[0]  # Shape: [frames, height, width, channels]
-    print(f"[LTX-2] Video shape: {video.shape if hasattr(video, 'shape') else 'N/A'}")
+    # Get video frames
+    video = output.frames[0]
+    print(f"[WAN2.2] Video shape: {video.shape if hasattr(video, 'shape') else type(video)}")
 
     gen_time = time.time() - start
-    print(f"[LTX-2] Video generated in {gen_time:.1f}s ({gen_time/duration_seconds:.1f}x realtime)")
+    print(f"[WAN2.2] Video generated in {gen_time:.1f}s ({gen_time/duration_seconds:.1f}x realtime)")
 
-    # Save to temp file
+    # Save to temp file using diffusers export helper
     output_path = tempfile.mktemp(suffix=".mp4")
 
-    # Use imageio for simple video writing
-    import imageio
-    writer = imageio.get_writer(
-        output_path,
-        fps=fps,
-        codec="libx264",
-        quality=8,  # 0-10, higher is better
-        pixelformat="yuv420p",
-    )
+    from diffusers.utils import export_to_video
+    export_to_video(video, output_path, fps=int(fps))
 
-    # video shape: [frames, height, width, channels] - already numpy array
-    for frame in video:
-        if isinstance(frame, np.ndarray):
-            writer.append_data(frame)
-        else:
-            writer.append_data(np.array(frame))
-    writer.close()
-
-    print(f"[LTX-2] Video saved to {output_path}")
+    print(f"[WAN2.2] Video saved to {output_path}")
     return output_path
 
 
@@ -198,7 +231,7 @@ def upload_to_supabase(video_path: str, project_id: str, clip_index: int) -> str
     # Create storage path
     storage_path = f"{project_id}/clips/clip_{clip_index:03d}.mp4"
 
-    print(f"[LTX-2] Uploading to Supabase: {storage_path}")
+    print(f"[WAN2.2] Uploading to Supabase: {storage_path}")
 
     with open(video_path, "rb") as f:
         video_data = f.read()
@@ -213,7 +246,7 @@ def upload_to_supabase(video_path: str, project_id: str, clip_index: int) -> str
     # Get public URL
     public_url = supabase.storage.from_(bucket).get_public_url(storage_path)
 
-    print(f"[LTX-2] Uploaded: {public_url}")
+    print(f"[WAN2.2] Uploaded: {public_url}")
     return public_url
 
 
@@ -226,19 +259,19 @@ def handler(job: dict) -> dict:
         "prompt": "A cinematic scene of...",
         "project_id": "abc123",
         "clip_index": 0,
-        "duration": 10,  # optional, default 10s
-        "width": 768,    # optional, default 768
-        "height": 512,   # optional, default 512
-        "fps": 24,       # optional, default 24
-        "seed": 42,      # optional
+        "duration": 5,       # optional, default 5s (max ~8s for 720p on 48GB)
+        "width": 1280,       # optional, default 1280 (720p)
+        "height": 720,       # optional, default 720 (720p)
+        "fps": 24,           # optional, default 24
+        "seed": 42,          # optional
     }
 
     Returns:
     {
         "video_url": "https://...",
-        "duration": 10.0,
-        "width": 768,
-        "height": 512,
+        "duration": 5.0,
+        "width": 1280,
+        "height": 720,
         "generation_time": 120.5
     }
     """
@@ -257,17 +290,17 @@ def handler(job: dict) -> dict:
         if not project_id:
             return {"error": "project_id is required"}
 
-        # Optional fields with defaults
-        duration = job_input.get("duration", 10)
-        width = job_input.get("width", 768)
-        height = job_input.get("height", 512)
+        # Optional fields with defaults optimized for 720p
+        duration = job_input.get("duration", 5)
+        width = job_input.get("width", 1280)
+        height = job_input.get("height", 720)
         fps = job_input.get("fps", 24)
         seed = job_input.get("seed")
-        num_inference_steps = job_input.get("num_inference_steps", 40)
-        guidance_scale = job_input.get("guidance_scale", 4.0)
+        num_inference_steps = job_input.get("num_inference_steps", 30)
+        guidance_scale = job_input.get("guidance_scale", 5.0)
         negative_prompt = job_input.get(
             "negative_prompt",
-            "worst quality, inconsistent motion, blurry, jittery, distorted"
+            "Bright tones, overexposed, static, blurred details, subtitles, worst quality, low quality, ugly, deformed, disfigured"
         )
 
         start_time = time.time()
@@ -305,7 +338,7 @@ def handler(job: dict) -> dict:
         }
 
     except Exception as e:
-        print(f"[LTX-2] Error: {e}")
+        print(f"[WAN2.2] Error: {e}")
         traceback.print_exc()
         log_disk_space("ERROR")
         return {"error": str(e)}
@@ -313,14 +346,14 @@ def handler(job: dict) -> dict:
 
 # Start the RunPod serverless handler
 if __name__ == "__main__":
-    print("[LTX-2] Starting RunPod serverless handler...")
+    print("[WAN2.2] Starting RunPod serverless handler...")
     log_disk_space("STARTUP")
 
     # Pre-load model for faster first request
     try:
         load_model()
     except Exception as e:
-        print(f"[LTX-2] Warning: Failed to pre-load model: {e}")
+        print(f"[WAN2.2] Warning: Failed to pre-load model: {e}")
         log_disk_space("PRELOAD_FAILED")
 
     runpod.serverless.start({"handler": handler})

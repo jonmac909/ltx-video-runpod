@@ -1,5 +1,5 @@
-# LTX Video Generation RunPod Serverless Handler
-# Uses HuggingFace Diffusers LTXPipeline
+# WAN 2.2 Video Generation RunPod Serverless Handler
+# Uses HuggingFace Diffusers WanPipeline (720p@24fps optimized)
 
 FROM nvidia/cuda:12.1.0-cudnn8-devel-ubuntu22.04
 
@@ -30,7 +30,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
 # Verify all imports work (model downloaded at runtime on first request)
-RUN python -c "from diffusers import LTXPipeline; from transformers import T5EncoderModel; import torch; print('All imports successful')"
+RUN python -c "from diffusers import WanPipeline, AutoModel; from transformers import UMT5EncoderModel; import torch; print('All WAN 2.2 imports successful')"
 
 # Copy handler
 COPY handler.py .
@@ -39,7 +39,7 @@ COPY handler.py .
 ENV PYTHONUNBUFFERED=1
 ENV PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 ENV CUDA_VISIBLE_DEVICES=0
-# Set HF cache to container disk
+# Set HF cache to container disk (100GB)
 ENV HF_HOME=/tmp/hf_cache
 ENV TRANSFORMERS_CACHE=/tmp/hf_cache
 ENV HUGGINGFACE_HUB_CACHE=/tmp/hf_cache
