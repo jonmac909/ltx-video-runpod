@@ -66,11 +66,12 @@ def load_model():
         torch_dtype=torch.bfloat16,
     )
 
-    # Memory optimizations for A40 (48GB) - enables 1080p generation
+    # Memory optimizations for 48GB GPUs - enables 1080p generation
     # CPU offload moves model parts to CPU when not in use, reducing VRAM
     PIPE.enable_model_cpu_offload()
-    PIPE.enable_vae_slicing()
-    PIPE.enable_vae_tiling()
+
+    # Note: enable_vae_slicing/tiling are for image pipelines, not video
+    # LTXPipeline doesn't support them
 
     log_disk_space("AFTER_LOAD")
     print(f"[LTX-2] Model loaded in {time.time() - start:.1f}s")
