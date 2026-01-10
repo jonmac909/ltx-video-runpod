@@ -55,22 +55,19 @@ def load_model():
 
     log_disk_space("BEFORE_LOAD")
 
-    print("[LTX-2] Loading model (distilled fp8 for smaller size)...")
+    print("[LTX-2] Loading full model...")
     start = time.time()
 
     from diffusers import LTXPipeline
 
-    # Use the smaller distilled model with fp8 quantization
-    # This is ~10GB instead of 60-80GB for the full model
+    # Full LTX-Video model
     PIPE = LTXPipeline.from_pretrained(
         "Lightricks/LTX-Video",
         torch_dtype=torch.bfloat16,
     )
 
-    # Move to GPU
+    # Move to GPU with memory optimizations
     PIPE.to("cuda")
-
-    # Enable memory optimizations
     PIPE.enable_vae_slicing()
     PIPE.enable_vae_tiling()
 
