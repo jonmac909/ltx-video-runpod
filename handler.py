@@ -1,7 +1,12 @@
 """
 WAN 2.2 Video Generation RunPod Serverless Handler
 Generates video clips from text prompts using HuggingFace Diffusers.
-Optimized for 720p@24fps on 48GB GPUs.
+Optimized for 720p@24fps on 80GB GPUs (A100/H100).
+
+Optimal settings based on official docs:
+- flow_shift: 5.0 for 720p, 3.0 for 480p
+- num_inference_steps: 50 (default), 30 for speed
+- guidance_scale: 5.0 (range 5-7, too high = flicker)
 """
 
 import os
@@ -115,6 +120,15 @@ def load_model():
         text_encoder=text_encoder,
         torch_dtype=torch.bfloat16
     )
+
+    # Configure scheduler with optimal flow_shift for 720p
+    # flow_shift=5.0 for 720p, 3.0 for 480p (per official docs)
+    from diffusers import UniPCMultistepScheduler
+    PIPE.scheduler = UniPCMultistepScheduler.from_config(
+        PIPE.scheduler.config,
+        flow_shift=5.0  # Optimal for 720p resolution
+    )
+
     PIPE.to("cuda")
 
     log_disk_space("AFTER_LOAD")
@@ -124,11 +138,11 @@ def load_model():
 
 def generate_video(
     prompt: str,
-    duration_seconds: float = 5.0,
+    duration_seconds: float = 10.0,
     width: int = 1280,
     height: int = 720,
     fps: float = 24.0,
-    num_inference_steps: int = 30,
+    num_inference_steps: int = 50,
     guidance_scale: float = 5.0,
     negative_prompt: str = "Bright tones, overexposed, static, blurred details, subtitles, worst quality, low quality, ugly, deformed, disfigured",
     seed: Optional[int] = None,
@@ -138,12 +152,12 @@ def generate_video(
 
     Args:
         prompt: Text description of the video to generate
-        duration_seconds: Video duration in seconds
+        duration_seconds: Video duration in seconds (10s default for 80GB GPU)
         width: Video width in pixels (1280 for 720p)
         height: Video height in pixels (720 for 720p)
         fps: Frames per second (24 recommended)
-        num_inference_steps: Denoising steps (30 is good balance)
-        guidance_scale: CFG scale (5.0 recommended for WAN)
+        num_inference_steps: Denoising steps (50 default, 30 for speed)
+        guidance_scale: CFG scale (5.0 recommended, 5-7 range)
         negative_prompt: What to avoid in the video
         seed: Random seed for reproducibility
 
@@ -172,11 +186,8 @@ def generate_video(
 
     start = time.time()
 
-    # Generate video
-    # Use shift value based on resolution (higher for 720p)
-    shift = 7.0  # Good for 720p resolution
-
-    print(f"[WAN2.2] Starting generation with {num_inference_steps} steps, shift={shift}...")
+    # Generate video (flow_shift=5.0 configured in scheduler for 720p)
+    print(f"[WAN2.2] Starting generation with {num_inference_steps} steps, guidance={guidance_scale}...")
     output = pipe(
         prompt=prompt,
         negative_prompt=negative_prompt,
