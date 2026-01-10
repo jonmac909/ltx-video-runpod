@@ -1,6 +1,6 @@
 # WAN 2.2 Video Generation RunPod Serverless Handler
 # Uses HuggingFace Diffusers WanPipeline (720p@24fps optimized)
-# v1.1.0 - Optimal settings: flow_shift=5.0, 50 steps, 10s duration
+# v1.1.1 - Fixed model ID: Wan-AI/Wan2.2-T2V-A14B-Diffusers (A14B not 14B)
 
 FROM nvidia/cuda:12.1.0-cudnn8-devel-ubuntu22.04
 

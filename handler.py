@@ -67,7 +67,7 @@ def load_model():
     from diffusers.hooks.group_offloading import apply_group_offloading
     from transformers import UMT5EncoderModel
 
-    model_id = "Wan-AI/Wan2.2-T2V-14B-Diffusers"
+    model_id = "Wan-AI/Wan2.2-T2V-A14B-Diffusers"
 
     # Load components with appropriate dtypes
     print("[WAN2.2] Loading text encoder...")
