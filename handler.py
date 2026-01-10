@@ -66,8 +66,9 @@ def load_model():
         torch_dtype=torch.bfloat16,
     )
 
-    # Move to GPU with memory optimizations
-    PIPE.to("cuda")
+    # Memory optimizations for A40 (48GB) - enables 1080p generation
+    # CPU offload moves model parts to CPU when not in use, reducing VRAM
+    PIPE.enable_model_cpu_offload()
     PIPE.enable_vae_slicing()
     PIPE.enable_vae_tiling()
 
