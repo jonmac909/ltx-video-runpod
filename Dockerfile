@@ -1,6 +1,6 @@
 # WAN 2.2 Video Generation RunPod Serverless Handler
 # Uses HuggingFace Diffusers WanPipeline (720p@24fps optimized)
-# v1.2.1 - Simplified build, removed slow import check
+# v1.2.2 - Add download timeout (300s) for large model files
 
 FROM nvidia/cuda:12.1.0-cudnn8-devel-ubuntu22.04
 

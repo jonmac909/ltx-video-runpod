@@ -25,6 +25,8 @@ from supabase import create_client, Client
 os.environ["HF_HOME"] = "/tmp/hf_cache"
 os.environ["TRANSFORMERS_CACHE"] = "/tmp/hf_cache"
 os.environ["HUGGINGFACE_HUB_CACHE"] = "/tmp/hf_cache"
+# Increase download timeout for large model files (default 10s is too short)
+os.environ["HF_HUB_DOWNLOAD_TIMEOUT"] = "300"  # 5 minutes per file
 # Enable download progress logging
 os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "0"
 os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0"  # Disable hf_transfer for better logging
