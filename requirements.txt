@@ -1,0 +1,23 @@
+# Core RunPod and HTTP
+runpod>=1.6.0
+requests>=2.31.0
+
+# Supabase for storage upload
+supabase>=2.0.0
+
+# PyTorch with CUDA support
+torch>=2.1.0
+torchvision>=0.16.0
+torchaudio>=2.1.0
+
+# HuggingFace Diffusers for LTX-2
+diffusers>=0.32.0
+transformers>=4.45.0
+accelerate>=0.25.0
+safetensors>=0.4.0
+
+# Image/Video processing
+Pillow>=10.0.0
+numpy>=1.24.0
+imageio>=2.31.0
+imageio-ffmpeg>=0.4.8
