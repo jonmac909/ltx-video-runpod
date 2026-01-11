@@ -203,8 +203,14 @@ def generate_video(
 
     start = time.time()
 
+    # Progress callback to log step completion
+    def progress_callback(pipe, step, timestep, callback_kwargs):
+        pct = int((step + 1) / num_inference_steps * 100)
+        print(f"[WAN2.2] Step {step + 1}/{num_inference_steps} ({pct}%)", flush=True)
+        return callback_kwargs
+
     # Generate video (flow_shift=5.0 configured in scheduler for 720p)
-    print(f"[WAN2.2] Starting generation with {num_inference_steps} steps, guidance={guidance_scale}...")
+    print(f"[WAN2.2] Starting generation with {num_inference_steps} steps, guidance={guidance_scale}...", flush=True)
     output = pipe(
         prompt=prompt,
         negative_prompt=negative_prompt,
@@ -214,6 +220,7 @@ def generate_video(
         height=height,
         width=width,
         generator=generator,
+        callback_on_step_end=progress_callback,
     )
 
     # Debug: Print output structure
