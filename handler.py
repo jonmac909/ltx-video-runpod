@@ -347,3 +347,4 @@ if __name__ == "__main__":
         log_disk_space("PRELOAD_FAILED")
 
     runpod.serverless.start({"handler": handler})
+
