@@ -1,6 +1,7 @@
 # WAN 2.2 Video Generation RunPod Serverless Handler
 # Uses HuggingFace Diffusers WanPipeline (720p@24fps optimized)
-# v1.2.3 - Add step progress logging (Step X/30 (Y%))
+# v1.2.5 - CRITICAL FIX: Remove leaf_level offloading (was 100x slower!)
+#          A100 80GB has enough VRAM - load everything to GPU directly
 
 FROM nvidia/cuda:12.1.0-cudnn8-devel-ubuntu22.04
 

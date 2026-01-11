@@ -68,84 +68,39 @@ def load_model():
     print("[WAN2.2] Loading model components...")
     start = time.time()
 
-    from diffusers import AutoModel, WanPipeline
-    from diffusers.hooks.group_offloading import apply_group_offloading
-    from transformers import UMT5EncoderModel
+    from diffusers import AutoencoderKLWan, WanPipeline
+    from diffusers.schedulers.scheduling_unipc_multistep import UniPCMultistepScheduler
 
     model_id = "Wan-AI/Wan2.2-T2V-A14B-Diffusers"
 
-    # Load components with appropriate dtypes
-    print("[WAN2.2] Loading text encoder...", flush=True)
-    t0 = time.time()
-    text_encoder = UMT5EncoderModel.from_pretrained(
-        model_id,
-        subfolder="text_encoder",
-        torch_dtype=torch.bfloat16
-    )
-    print(f"[WAN2.2] Text encoder loaded in {time.time()-t0:.1f}s", flush=True)
-
+    # Load VAE with float32 for better decoding quality
     print("[WAN2.2] Loading VAE (float32 for quality)...", flush=True)
     t0 = time.time()
-    vae = AutoModel.from_pretrained(
+    vae = AutoencoderKLWan.from_pretrained(
         model_id,
         subfolder="vae",
-        torch_dtype=torch.float32  # float32 for better decoding quality
+        torch_dtype=torch.float32
     )
     print(f"[WAN2.2] VAE loaded in {time.time()-t0:.1f}s", flush=True)
 
-    print("[WAN2.2] Loading transformer (this is ~27GB, may take 5-10 min on cold start)...", flush=True)
+    # Load full pipeline - A100 80GB has enough VRAM, no offloading needed!
+    print("[WAN2.2] Loading pipeline (A100 80GB - no offloading needed)...", flush=True)
     t0 = time.time()
-    transformer = AutoModel.from_pretrained(
+    PIPE = WanPipeline.from_pretrained(
         model_id,
-        subfolder="transformer",
+        vae=vae,
         torch_dtype=torch.bfloat16
     )
-    print(f"[WAN2.2] Transformer loaded in {time.time()-t0:.1f}s", flush=True)
-
-    # Apply group offloading for memory efficiency on 48GB GPUs
-    print("[WAN2.2] Applying group offloading...")
-    onload_device = torch.device("cuda")
-    offload_device = torch.device("cpu")
-
-    apply_group_offloading(
-        text_encoder,
-        onload_device=onload_device,
-        offload_device=offload_device,
-        offload_type="block_level",
-        num_blocks_per_group=4
-    )
-
-    transformer.enable_group_offload(
-        onload_device=onload_device,
-        offload_device=offload_device,
-        offload_type="leaf_level",
-        use_stream=True
-    )
-
-    # Create pipeline with pre-loaded components (skip downloading duplicates)
-    print("[WAN2.2] Creating pipeline (skipping already-loaded components)...", flush=True)
-    from diffusers import UniPCMultistepScheduler
-    from transformers import AutoTokenizer
-
-    # Load only the small components we don't have yet
-    tokenizer = AutoTokenizer.from_pretrained(model_id, subfolder="tokenizer")
-    scheduler = UniPCMultistepScheduler.from_pretrained(model_id, subfolder="scheduler")
+    print(f"[WAN2.2] Pipeline loaded in {time.time()-t0:.1f}s", flush=True)
 
     # Configure scheduler with optimal flow_shift for 720p
-    scheduler = UniPCMultistepScheduler.from_config(
-        scheduler.config,
+    PIPE.scheduler = UniPCMultistepScheduler.from_config(
+        PIPE.scheduler.config,
         flow_shift=5.0  # Optimal for 720p resolution
     )
 
-    # Construct pipeline directly without re-downloading large components
-    PIPE = WanPipeline(
-        vae=vae,
-        transformer=transformer,
-        text_encoder=text_encoder,
-        tokenizer=tokenizer,
-        scheduler=scheduler,
-    )
-
+    # Move everything to GPU - A100 80GB can handle it
+    print("[WAN2.2] Moving to CUDA...", flush=True)
     PIPE.to("cuda")
 
     log_disk_space("AFTER_LOAD")
